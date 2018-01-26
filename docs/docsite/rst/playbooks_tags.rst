@@ -12,7 +12,7 @@ Example::
     tasks:
 
         - yum: name={{ item }} state=installed
-          with_items:
+          loop:
              - httpd
              - memcached
           tags:
@@ -80,9 +80,14 @@ You may also apply tags to roles::
     roles:
       - { role: webserver, port: 5000, tags: [ 'web', 'foo' ] }
 
-And include statements::
+And import/include statements::
 
-    - include: foo.yml
+    - import_tasks: foo.yml
+      tags: [web,foo]
+
+or::
+
+    - include_tasks: foo.yml
       tags: [web,foo]
 
 All of these apply the specified tags to EACH task inside the play, included

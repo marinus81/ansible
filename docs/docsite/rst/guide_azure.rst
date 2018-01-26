@@ -40,11 +40,11 @@ There is now a detailed official tutorial describing `how to create a service pr
 
 After stepping through the tutorial you will have:
 
-* Your Client ID, which is found in the “client id” box in the “Configure” page of your application in the Azure portal
+* Your Client ID, which is found in the "client id" box in the "Configure" page of your application in the Azure portal
 * Your Secret key, generated when you created the application. You cannot show the key after creation.
-  If you lost the key, you must create a new one in the “Configure” page of your application.
-* And finally, a tenant ID. It’s a UUID (e.g. ABCDEFGH-1234-ABCD-1234-ABCDEFGHIJKL) pointing to the AD containing your
-  application. You will find it in the URL from within the Azure portal, or in the “view endpoints” of any given URL.
+  If you lost the key, you must create a new one in the "Configure" page of your application.
+* And finally, a tenant ID. It's a UUID (e.g. ABCDEFGH-1234-ABCD-1234-ABCDEFGHIJKL) pointing to the AD containing your
+  application. You will find it in the URL from within the Azure portal, or in the "view endpoints" of any given URL.
 
 
 Using Active Directory Username/Password
@@ -404,3 +404,15 @@ You can execute the playbook with something like:
 .. code-block:: bash
 
     $ ansible-playbook -i ./ansible/contrib/inventory/azure_rm.py test_azure_inventory.yml
+
+
+Disabling certificate validation on Azure endpoints
+...................................................
+
+When an HTTPS proxy is present, or when using Azure Stack, it may be necessary to disable certificate validation for
+Azure endpoints in the Azure modules. This is not a recommended security practice, but may be necessary when the system
+CA store cannot be altered to include the necessary CA certificate. Certificate validation can be controlled by setting
+the "cert_validation_mode" value in a credential profile, via the "AZURE_CERT_VALIDATION_MODE" environment variable, or
+by passing the "cert_validation_mode" argument to any Azure module. The default value is "validate"; setting the value
+to "ignore" will prevent all certificate validation. The module argument takes precedence over a credential profile value,
+which takes precedence over the environment value.

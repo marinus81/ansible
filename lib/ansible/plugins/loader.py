@@ -1,23 +1,9 @@
 # (c) 2012, Daniel Hokka Zakrisson <daniel@hozac.com>
 # (c) 2012-2014, Michael DeHaan <michael.dehaan@gmail.com> and others
 # (c) 2017, Toshio Kuratomi <tkuratomi@ansible.com>
-#
-# This file is part of Ansible
-#
-# Ansible is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# Ansible is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with Ansible.  If not, see <http://www.gnu.org/licenses/>.
+# (c) 2017 Ansible Project
+# GNU General Public License v3.0+ (see COPYING or https://www.gnu.org/licenses/gpl-3.0.txt)
 
-# Make coding more python3-ish
 from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
@@ -31,9 +17,11 @@ import warnings
 from collections import defaultdict
 
 from ansible import constants as C
-from ansible.plugins import get_plugin_class, MODULE_CACHE, PATH_CACHE, PLUGIN_PATH_CACHE
+from ansible.errors import AnsibleError
 from ansible.module_utils._text import to_text
-from ansible.parsing.plugin_docs import read_docstring
+from ansible.parsing.utils.yaml import from_yaml
+from ansible.plugins import get_plugin_class, MODULE_CACHE, PATH_CACHE, PLUGIN_PATH_CACHE
+from ansible.utils.plugin_docs import get_docstring
 
 try:
     from __main__ import display
@@ -56,12 +44,15 @@ class PluginLoader:
     The first match is used.
     '''
 
-    def __init__(self, class_name, package, config, subdir, aliases={}, required_base_class=None):
+    def __init__(self, class_name, package, config, subdir, aliases=None, required_base_class=None):
+        aliases = {} if aliases is None else aliases
 
         self.class_name = class_name
         self.base_class = required_base_class
         self.package = package
         self.subdir = subdir
+
+        # FIXME: remove alias dict in favor of alias by symlink?
         self.aliases = aliases
 
         if config and not isinstance(config, list):
@@ -217,13 +208,16 @@ class PluginLoader:
         ''' Reads plugin docs to find configuration setting definitions, to push to config manager for later use '''
 
         # plugins w/o class name don't support config
-        if self.class_name and self.class_name in ('Connection'):
-            # FIXME: expand from just connection
-            type_name = get_plugin_class(self)
-            dstring = read_docstring(path, verbose=False, ignore_errors=False)
-            if dstring.get('doc', False):
-                if 'options' in dstring['doc'] and isinstance(dstring['doc']['options'], dict):
-                    C.config.initialize_plugin_configuration_definitions(type_name, name, dstring['doc']['options'])
+        if self.class_name:
+            type_name = get_plugin_class(self.class_name)
+
+            # FIXME: expand to other plugins, but never doc fragments
+            # if type name != 'module_doc_fragment':
+            if type_name in ('callback', 'connection', 'inventory', 'lookup', 'shell'):
+                dstring = get_docstring(path, fragment_loader, verbose=False, ignore_errors=True)[0]
+
+                if dstring and 'options' in dstring and isinstance(dstring['options'], dict):
+                    C.config.initialize_plugin_configuration_definitions(type_name, name, dstring['options'])
                     display.debug('Loaded config def from plugin (%s/%s)' % (type_name, name))
 
     def add_directory(self, directory, with_subdir=False):
@@ -238,9 +232,14 @@ class PluginLoader:
                 # append the directory and invalidate the path cache
                 self._extra_dirs.append(directory)
                 self._paths = None
+                display.debug('Added %s to loader search path' % (directory))
 
-    def find_plugin(self, name, mod_type='', ignore_deprecated=False):
+    def find_plugin(self, name, mod_type='', ignore_deprecated=False, check_aliases=False):
         ''' Find a plugin named name '''
+
+        global _PLUGIN_FILTERS
+        if name in _PLUGIN_FILTERS[self.package]:
+            return None
 
         if mod_type:
             suffix = mod_type
@@ -251,6 +250,9 @@ class PluginLoader:
             # Only Ansible Modules.  Ansible modules can be any executable so
             # they can have any suffix
             suffix = ''
+
+        if check_aliases:
+            name = self.aliases.get(name, name)
 
         # The particular cache to look for modules within.  This matches the
         # requested mod_type
@@ -409,6 +411,8 @@ class PluginLoader:
     def all(self, *args, **kwargs):
         ''' instantiates all plugins with the same arguments '''
 
+        global _PLUGIN_FILTERS
+
         path_only = kwargs.pop('path_only', False)
         class_only = kwargs.pop('class_only', False)
         all_matches = []
@@ -417,10 +421,10 @@ class PluginLoader:
         for i in self._get_paths():
             all_matches.extend(glob.glob(os.path.join(i, "*.py")))
 
-        for path in sorted(all_matches, key=lambda match: os.path.basename(match)):
+        for path in sorted(all_matches, key=os.path.basename):
             name = os.path.basename(os.path.splitext(path)[0])
 
-            if '__init__' in name:
+            if '__init__' in name or name in _PLUGIN_FILTERS[self.package]:
                 continue
 
             if path_only:
@@ -428,7 +432,14 @@ class PluginLoader:
                 continue
 
             if path not in self._module_cache:
-                self._module_cache[path] = self._load_module_source(name, path)
+                module = self._load_module_source(name, path)
+                if module in self._module_cache.values():
+                    # In ``_load_module_source`` if a plugin has a duplicate name, we just return the
+                    # previously matched plugin from sys.modules, which means you are never getting both,
+                    # just one, but cached for both paths, this isn't normally a problem, except with callbacks
+                    # where it will run that single callback twice. This rejects duplicates.
+                    continue
+                self._module_cache[path] = module
                 found_in_cache = False
 
             try:
@@ -458,6 +469,72 @@ class PluginLoader:
 
             self._update_object(obj, name, path)
             yield obj
+
+
+def _load_plugin_filter():
+    filters = defaultdict(frozenset)
+
+    if C.PLUGIN_FILTERS_CFG is None:
+        filter_cfg = '/etc/ansible/plugin_filters.yml'
+        user_set = False
+    else:
+        filter_cfg = C.PLUGIN_FILTERS_CFG
+        user_set = True
+
+    if os.path.exists(filter_cfg):
+        with open(filter_cfg, 'rb') as f:
+            try:
+                filter_data = from_yaml(f.read())
+            except Exception as e:
+                display.warning(u'The plugin filter file, {0} was not parsable.'
+                                u' Skipping: {1}'.format(filter_cfg, to_text(e)))
+                return filters
+
+        try:
+            version = filter_data['filter_version']
+        except KeyError:
+            display.warning(u'The plugin filter file, {0} was invalid.'
+                            u' Skipping.'.format(filter_cfg))
+            return filters
+
+        # Try to convert for people specifying version as a float instead of string
+        version = to_text(version)
+        version = version.strip()
+
+        if version == u'1.0':
+            # Modules and action plugins share the same blacklist since the difference between the
+            # two isn't visible to the users
+            filters['ansible.modules'] = frozenset(filter_data['module_blacklist'])
+            filters['ansible.plugins.action'] = filters['ansible.modules']
+        else:
+            display.warning(u'The plugin filter file, {0} was a version not recognized by this'
+                            u' version of Ansible. Skipping.')
+    else:
+        if user_set:
+            display.warning(u'The plugin filter file, {0} does not exist.'
+                            u' Skipping.'.format(filter_cfg))
+
+    # Specialcase the stat module as Ansible can run very few things if stat is blacklisted.
+    if 'stat' in filters['ansible.modules']:
+        raise AnsibleError('The stat module was specified in the module blacklist file, {0}, but'
+                           ' Ansible will not function without the stat module.  Please remove stat'
+                           ' from the blacklist.'.format(filter_cfg))
+    return filters
+
+
+# TODO: All of the following is initialization code   It should be moved inside of an initialization
+# function which is called at some point early in the ansible and ansible-playbook CLI startup.
+
+_PLUGIN_FILTERS = _load_plugin_filter()
+
+# doc fragments first
+fragment_loader = PluginLoader(
+    'ModuleDocFragment',
+    'ansible.utils.module_docs_fragments',
+    os.path.join(os.path.dirname(__file__), 'module_docs_fragments'),
+    '',
+)
+
 
 action_loader = PluginLoader(
     'ActionModule',
@@ -542,13 +619,6 @@ test_loader = PluginLoader(
     'test_plugins'
 )
 
-fragment_loader = PluginLoader(
-    'ModuleDocFragment',
-    'ansible.utils.module_docs_fragments',
-    os.path.join(os.path.dirname(__file__), 'module_docs_fragments'),
-    '',
-)
-
 strategy_loader = PluginLoader(
     'StrategyModule',
     'ansible.plugins.strategy',
@@ -585,4 +655,11 @@ netconf_loader = PluginLoader(
     'netconf_plugins',
     'netconf_plugins',
     required_base_class='NetconfBase'
+)
+
+inventory_loader = PluginLoader(
+    'InventoryModule',
+    'ansible.plugins.inventory',
+    C.DEFAULT_INVENTORY_PLUGIN_PATH,
+    'inventory_plugins'
 )

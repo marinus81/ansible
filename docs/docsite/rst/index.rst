@@ -9,7 +9,7 @@ Welcome to the Ansible documentation!
 Ansible is an IT automation tool.  It can configure systems, deploy software, and orchestrate more advanced IT tasks
 such as continuous deployments or zero downtime rolling updates.
 
-Ansible's main goals are simplicity and ease-of-use. It also has a strong focus on security and reliability, featuring a minimum of moving parts, usage of OpenSSH for transport (with an accelerated socket mode and pull modes as alternatives), and a language that is designed around auditability by humans--even those not familiar with the program.
+Ansible's main goals are simplicity and ease-of-use. It also has a strong focus on security and reliability, featuring a minimum of moving parts, usage of OpenSSH for transport (with other transports and pull modes as alternatives), and a language that is designed around auditability by humans--even those not familiar with the program.
 
 We believe simplicity is relevant to all sizes of environments, so we design for busy users of all types: developers, sysadmins, release engineers, IT managers, and everyone in between. Ansible is appropriate for managing all environments, from small setups with a handful of instances to enterprise environments with many thousands of instances.
 
@@ -23,19 +23,21 @@ Ansible, Inc. releases a new major release of Ansible approximately every two mo
 .. _an_introduction:
 
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
 
    intro
    quickstart
    playbooks
    playbooks_special_topics
    modules
-   modules_by_category
+   module_docs/modules_by_category
    vault
+   command_line_tools
+   plugins_by_category
    guides
    dev_guide/index
    tower
-   community
+   community/index
    galaxy
    test_strategies
    faq
@@ -45,3 +47,4 @@ Ansible, Inc. releases a new major release of Ansible approximately every two mo
    porting_guides
    python_3_support
    release_and_maintenance
+   windows
