@@ -85,8 +85,10 @@ Ansible Changes By Release
 - amazon
   * aws_acm_facts
   * aws_application_scaling_policy
+  * aws_az_facts
   * aws_direct_connect_gateway
   * aws_kms_facts
+  * aws_region_facts
   * aws_s3_cors
   * aws_ssm_parameter_store
   * cloudfront_distribution
@@ -99,6 +101,7 @@ Ansible Changes By Release
   * ecs_taskdefinition_facts
   * elasticache_facts
   * iam_role_facts
+  * iam_user
 - azure
   * azure_rm_containerinstance
   * azure_rm_containerregistry
@@ -135,15 +138,19 @@ Ansible Changes By Release
 - vmware
   * vmware_cfg_backup
   * vmware_datastore_facts
+  * vmware_drs_rule_facts
   * vmware_guest_file_operation
   * vmware_guest_powerstate
+  * vmware_host_acceptance
   * vmware_host_config_facts
   * vmware_host_config_manager
   * vmware_host_facts
   * vmware_host_ntp
   * vmware_host_service_facts
   * vmware_host_service_manager
+  * vmware_host_vmnic_facts
   * vmware_local_role_manager
+  * vmware_vm_vm_drs_rule
 - vultr
   * vr_account_facts
   * vr_dns_domain
